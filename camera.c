@@ -157,7 +157,43 @@ int camera_init(struct camera *camera, struct camera_platform_config *params)
 
 void camera_term(struct camera *camera)
 {
-	// TODO :-)
+    if (!camera) return;
+
+    struct camera_platform_config *platform = camera->driver_host.platform;
+    PIO pio = platform->pio;
+
+    // 1. Deshabilitar las state machines del PIO usadas por la cámara (frame + planos)
+    uint8_t num_planes = format_num_planes(camera->config.format);
+    for (int i = 0; i < num_planes; i++) {
+        pio_sm_set_enabled(pio, i + 1, false);
+    }
+    pio_sm_set_enabled(pio, CAMERA_PIO_FRAME_SM, false);
+
+    // 2. Limpiar las interrupciones asociadas al PIO
+    if (pio == pio0) {
+        irq_set_enabled(PIO0_IRQ_0, false);
+        irq_ctxs[0] = NULL;
+    } else if (pio == pio1) {
+        irq_set_enabled(PIO1_IRQ_0, false);
+        irq_ctxs[1] = NULL;
+    }
+
+    // 3. Liberar los canales DMA usados por la cámara
+    for (int i = 0; i < CAMERA_MAX_N_PLANES; i++) {
+        if (camera->dma_channels[i] >= 0) {
+            dma_channel_unclaim(camera->dma_channels[i]);
+            camera->dma_channels[i] = -1;
+        }
+    }
+
+    // 4. (Opcional) Remover los programas del PIO si los agregaste dinámicamente
+    // No hay API estándar para remover, pero si tuvieras referencias a los offset, podrías liberar memoria aquí
+
+    // 5. (Opcional) Resetear la estructura camera
+    camera->pending = NULL;
+    camera->pending_cb = NULL;
+    camera->cb_data = NULL;
+    // Puedes limpiar más campos si lo crees necesario
 }
 
 static OV7670_colorspace ov7670_colorspace_from_format(uint32_t format)

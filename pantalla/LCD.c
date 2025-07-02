@@ -1,14 +1,13 @@
 #include "LCD.h"
-#include "SSD1283A.h"
 #include <stdio.h>
 
-#define PIN_LED  15
 #define PIN_DC   16
 #define PIN_CS   17 
 #define PIN_SCK  18
 #define PIN_MOSI 19
 #define PIN_RST  20
-#define PIN_VCC  22
+#define PIN_VCC  15
+#define PIN_LED  22
 
 static inline void cs_select(SSD1283A_host *host) {
     asm volatile("nop \n nop \n nop");
@@ -60,19 +59,20 @@ SSD1283A_status lcd_init(struct LCD *lcd, struct lcd_platform_config *platform) 
     gpio_set_dir(PIN_DC, GPIO_OUT);  
     gpio_set_function(PIN_DC, GPIO_FUNC_SIO);
 
+    static SSD1283A_pins pins = {
+        .cs = PIN_CS,
+        .dc = PIN_DC,
+        .rst = PIN_RST,
+        .led = PIN_LED,
+    };
+
     lcd->driver_host = (SSD1283A_host){
-        .pins = &(SSD1283A_pins){
-            .cs = PIN_CS,  // Chip Select pin
-            .dc = PIN_DC,  // Data/Command pin
-            .rst = PIN_RST, // Reset pin
-            .led = PIN_LED, // Backlight pin
-        },
-		.platform = platform,
-	};
+        .pins = &pins,
+        .platform = platform,
+    };
 
     // Inicializa el controlador SSD1283A
     SSD1283A_status status = SSD1283A_begin(&lcd->driver_host);
-
     if (status != SSD1283A_STATUS_OK) {
         return status; // Error al inicializar el controlador
     }
@@ -80,9 +80,7 @@ SSD1283A_status lcd_init(struct LCD *lcd, struct lcd_platform_config *platform) 
     return SSD1283A_STATUS_OK; // Inicialización exitosa
 }
 
-void SSD1283A_write_command(SSD1283A_host *host, void *platform, uint8_t command){
-    struct lcd_platform_config *pcfg = (struct lcd_platform_config *)platform;
-
+void SSD1283A_write_command(SSD1283A_host *host, struct lcd_platform_config *pcfg, uint8_t command){
     // Asume que tienes control de DC y CS en tu plataforma
     // 1. Selecciona el chip
     cs_select(host);
@@ -95,10 +93,8 @@ void SSD1283A_write_command(SSD1283A_host *host, void *platform, uint8_t command
     cs_deselect(host);
 }
 
-void SSD1283A_write_data(SSD1283A_host *host, void *platform, uint8_t data)
+void SSD1283A_write_data(SSD1283A_host *host, struct lcd_platform_config *pcfg, uint8_t data)
 {
-    struct lcd_platform_config *pcfg = (struct lcd_platform_config *)platform;
-
     // Asume que tienes control de DC y CS en tu plataforma
     // 1. Selecciona el chip
     cs_select(host);
@@ -111,10 +107,8 @@ void SSD1283A_write_data(SSD1283A_host *host, void *platform, uint8_t data)
     cs_deselect(host);
 }
 
-void SSD1283A_write_register(SSD1283A_host *host, void *platform, uint8_t reg, uint16_t value)
+void SSD1283A_write_register(SSD1283A_host *host, struct lcd_platform_config *pcfg, uint8_t reg, uint16_t value)
 {
-    struct lcd_platform_config *pcfg = (struct lcd_platform_config *)platform;
-
     // Asume que tienes control de DC y CS en tu plataforma
     // 1. Selecciona el chip
     cs_select(host);
@@ -132,40 +126,39 @@ void SSD1283A_write_register(SSD1283A_host *host, void *platform, uint8_t reg, u
     cs_deselect(host);
 }
 
-void SSD1283A_write_data_prueba(SSD1283A_host *host, void *platform, uint16_t data)
-{
-    struct lcd_platform_config *pcfg = (struct lcd_platform_config *)platform;
+void SSD1283A_write_color_16bit(SSD1283A_host *host, struct lcd_platform_config *pcfg, uint16_t color) {
+    uint8_t buf[2] = { color >> 8, color & 0xFF };
 
-    // Asume que tienes control de DC y CS en tu plataforma
-    // 1. Selecciona el chip
     cs_select(host);
-
-    // 2. DC para datos
     dc_data(host);
-    // Enviar el dato de 16 bits como dos bytes
-    uint8_t data_buf[2] = { data >> 8, data & 0xFF };
-    pcfg->spi_write_blocking(pcfg->spi_handle, data_buf, 2);
-
-    // 3. Deselecciona el chip
+    pcfg->spi_write_blocking(pcfg->spi_handle, buf, 2);
     cs_deselect(host);
 }
 
-void lcd_fill_screen(struct LCD *lcd, uint16_t color) {
-    // Establece la ventana de dirección
-    uint16_t Ncolumn = 131<<8; // Posición final
-    uint16_t Nrow = 131<<8; // Posición final
+void lcd_fill_screen(struct LCD *lcd, uint16_t *color) {
+    uint8_t x_start = 0x00;
+    uint8_t x_end   = 80;
+    uint8_t y_start = 0x00;
+    uint8_t y_end   = 60;
 
-    SSD1283A_write_register(&lcd->driver_host, lcd->driver_host.platform, SSD1283A_CMD_HORIZONTAL_RAM_ADDR, Ncolumn); // GRAM Address Set. // 0X00 start x column
-    SSD1283A_write_register(&lcd->driver_host, lcd->driver_host.platform, SSD1283A_CMD_VERTICAL_RAM_ADDR, Nrow); // GRAM Address Set. // 0X00 start y row
+    struct lcd_platform_config *platform = (struct lcd_platform_config *)lcd->driver_host.platform;
 
-    SSD1283A_write_command(&lcd->driver_host, lcd->driver_host.platform, SSD1283A_CMD_SET_GDDRAM_XY); // Set GDDRAM X and Y
-    SSD1283A_write_data(&lcd->driver_host, lcd->driver_host.platform, 0x00); // Columna
-    SSD1283A_write_data(&lcd->driver_host, lcd->driver_host.platform, 0x00); // Fila
+    // 1. Set horizontal window: reg 0x44 (HEA << 8) | HSA
+    SSD1283A_write_register(&lcd->driver_host, platform, SSD1283A_CMD_HORIZONTAL_RAM_ADDR, (x_end << 8) | x_start);
 
-    SSD1283A_write_command(&lcd->driver_host, lcd->driver_host.platform, SSD1283A_CMD_RAM_WRITE); // Iniciar escritura de datos
-    for (uint32_t i = 0; i < (Ncolumn * Nrow); i++) {
-        // Enviar el color
-        SSD1283A_write_data(&lcd->driver_host, lcd->driver_host.platform, color >> 8);     // Byte alto
-        SSD1283A_write_data(&lcd->driver_host, lcd->driver_host.platform, color & 0xFF);   // Byte bajo
+    // 2. Set vertical window: reg 0x45 (VEA << 8) | VSA
+    SSD1283A_write_register(&lcd->driver_host, platform, SSD1283A_CMD_VERTICAL_RAM_ADDR, (y_end << 8) | y_start);
+
+    // 3. Set GDDRAM address pointer: reg 0x21 (Y << 8) | X
+    SSD1283A_write_command(&lcd->driver_host, platform, SSD1283A_CMD_SET_GDDRAM_XY);
+    SSD1283A_write_data(&lcd->driver_host, platform, x_start); // X address
+    SSD1283A_write_data(&lcd->driver_host, platform, y_start); // Y address
+
+    // 4. RAM write command
+    SSD1283A_write_command(&lcd->driver_host, platform, SSD1283A_CMD_RAM_WRITE);
+    // 5. Write pixels (RGB565 format)
+    for (uint32_t i = 0; i < (x_end - x_start) * (y_end - y_start); i++) {
+        SSD1283A_write_color_16bit(&lcd->driver_host, platform, color[i]);
     }
 }
+

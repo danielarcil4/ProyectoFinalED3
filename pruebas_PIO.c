@@ -54,7 +54,7 @@ int main() {
 	stdio_init_all();
 
 	// Wait some time for USB serial connection
-	sleep_ms(3000);
+	sleep_ms(1000);
 
 	gpio_init(CAM_RET_PIN);
     gpio_set_dir(CAM_RET_PIN, GPIO_OUT);
@@ -71,19 +71,6 @@ int main() {
 	gpio_pull_up(CAMERA_SCL);
 
 	spi_init(SPI_PORT, 500 * 1000);
-
-    struct LCD lcd;
-    struct lcd_platform_config platform_lcd = {
-        .spi_handle = SPI_PORT,
-        .spi_write_blocking = __spi_write_blocking,
-        .base_dma_channel = -1, // No se usa DMA en este ejemplo
-    };
-
-    SSD1283A_status status = lcd_init(&lcd, &platform_lcd);
-    if (status != SSD1283A_STATUS_OK) {
-        printf("Error initializing LCD: %d\n", status);
-        return -1; // Error al inicializar el LCD
-    }
 
 	struct camera camera;
 	struct camera_platform_config platform_camera = {
@@ -110,6 +97,19 @@ int main() {
 	struct camera_buffer *buf = camera_buffer_alloc(FORMAT_RGB565, width, height);
 	assert(buf);
 
+	struct LCD lcd;
+    struct lcd_platform_config platform_lcd = {
+        .spi_handle = SPI_PORT,
+        .spi_write_blocking = __spi_write_blocking,
+        .base_dma_channel = -1, // No se usa DMA en este ejemplo
+    };
+
+    SSD1283A_status status = lcd_init(&lcd, &platform_lcd);
+    if (status != SSD1283A_STATUS_OK) {
+        printf("Error initializing LCD: %d\n", status);
+        return -1; // Error al inicializar el LCD
+    }
+
 	while (1) {
 		printf("Capturing...\n");
 		gpio_put(LED_PIN, 1);
@@ -124,16 +124,18 @@ int main() {
 			for (y = 0; y < height; y++) {
 				uint16_t row[width];
 				for (x = 0; x < width; x++) {
-					uint8_t b = buf->data[0][buf->strides[0] * y + x];
-					uint8_t g = buf->data[1][buf->strides[0] * y + x];
-					uint8_t r = buf->data[2][buf->strides[0] * y + x];
-					uint16_t pixel = r  << 11 | g  << 5 | b; 
-					image[y * width + x] = 0xF800;
+					uint16_t pixel565 = buf->data[0][buf->strides[0] * y + x];
+					uint8_t r = (pixel565 >> 11) & 0x1F;
+					uint8_t g = (pixel565 >> 5) & 0x3F;
+					uint8_t b = pixel565 & 0x1F;
+					printf("r: %d, g: %d, b: %d\n", r, g, b);
+					// Convertir a RGB565
+					image[y * width + x] = (r  << 11) | (g  << 5) | b; ;
 				}
 			}
-			lcd_fill_screen(&lcd, 0xF800); 
-			printf("Screen filled with image data\n");
-			while(1);
+			//camera_term(&camera);
+			lcd_fill_screen(&lcd, image); // Llenar pantalla con el primer pixel
+			sleep_ms(1000); // Esperar un segundo antes de la siguiente captura
 		}
 	}
 }
