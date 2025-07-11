@@ -135,11 +135,34 @@ void SSD1283A_write_color_16bit(SSD1283A_host *host, struct lcd_platform_config 
     cs_deselect(host);
 }
 
-void lcd_fill_screen(struct LCD *lcd, uint16_t *color) {
-    uint8_t x_start = 0x00;
-    uint8_t x_end   = 80;
-    uint8_t y_start = 0x00;
-    uint8_t y_end   = 60;
+void lcd_fill_screen(struct LCD *lcd, uint16_t color) {
+    uint16_t x_start = 0, x_end   = 135-1;
+    uint16_t y_start = 0, y_end   = 135-1;
+
+    struct lcd_platform_config *platform = (struct lcd_platform_config *)lcd->driver_host.platform;
+
+    // 1. Set horizontal window: reg 0x44 (HEA << 8) | HSA
+    SSD1283A_write_register(&lcd->driver_host, platform, SSD1283A_CMD_HORIZONTAL_RAM_ADDR, (x_end << 8) | x_start);
+
+    // 2. Set vertical window: reg 0x45 (VEA << 8) | VSA
+    SSD1283A_write_register(&lcd->driver_host, platform, SSD1283A_CMD_VERTICAL_RAM_ADDR, (y_end << 8) | y_start);
+
+    // 3. Set GDDRAM address pointer: reg 0x21 (Y << 8) | X
+    SSD1283A_write_command(&lcd->driver_host, platform, SSD1283A_CMD_SET_GDDRAM_XY);
+    SSD1283A_write_data(&lcd->driver_host, platform, x_start); // X address
+    SSD1283A_write_data(&lcd->driver_host, platform, y_start); // Y address
+
+    // 4. RAM write command
+    SSD1283A_write_command(&lcd->driver_host, platform, SSD1283A_CMD_RAM_WRITE);
+    // 5. Write pixels (RGB565 format)
+    for (uint32_t i = 0; i < (x_end - x_start) * (y_end - y_start); i++) {
+        SSD1283A_write_color_16bit(&lcd->driver_host, platform, color);
+    }
+}
+
+void lcd_show_image(struct LCD *lcd, uint16_t width, uint16_t height, uint16_t *color) {
+    uint16_t x_start = 30, x_end   = width-1;
+    uint16_t y_start = 30, y_end   = height-1;
 
     struct lcd_platform_config *platform = (struct lcd_platform_config *)lcd->driver_host.platform;
 
@@ -161,4 +184,3 @@ void lcd_fill_screen(struct LCD *lcd, uint16_t *color) {
         SSD1283A_write_color_16bit(&lcd->driver_host, platform, color[i]);
     }
 }
-

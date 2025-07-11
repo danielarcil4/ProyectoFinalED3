@@ -131,7 +131,7 @@ int camera_init(struct camera *camera, struct camera_platform_config *params)
 	}
 
 	// Note: Frame rate is ignored
-	status = OV7670_begin(&camera->driver_host, OV7670_COLOR_YUV, OV7670_SIZE_DIV8, 0.0);
+	status = OV7670_begin(&camera->driver_host, OV7670_COLOR_RGB, OV7670_SIZE_DIV8, 0.0);
 	if (status != OV7670_STATUS_OK) {
 		return -1;
 	}

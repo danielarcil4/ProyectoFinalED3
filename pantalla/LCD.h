@@ -36,6 +36,8 @@ struct LCD{
 
 // Prototipos de funciones
 SSD1283A_status lcd_init(struct LCD *lcd, struct lcd_platform_config *platform);
-void lcd_fill_screen(struct LCD *lcd, uint16_t *color);
+void lcd_fill_screen(struct LCD *lcd, uint16_t color);
+void lcd_show_image(struct LCD *lcd,uint16_t width, uint16_t height, uint16_t *color);
+
 
 #endif // __LCD__H

@@ -31,6 +31,9 @@
 #define CAM_RET_PIN     14
 #define CAMERA_SDA      0
 #define CAMERA_SCL      1
+#define BUTTON_PIN      13
+
+bool take_picture = false;
 
 static inline int __i2c_write_blocking(void *i2c_handle, uint8_t addr, const uint8_t *src, size_t len)
 {
@@ -47,14 +50,26 @@ static inline int8_t __spi_write_blocking(void *spi_handle, const uint8_t *src, 
 	return spi_write_blocking((spi_inst_t *)spi_handle, src, len);
 }
 
-// From http://www.paulbourke.net/dataformats/asciiart/
-const char charmap[] = " .:-=+*#%@";
+static void take_picture_callback(uint gpio, uint32_t events) {
+	printf("gpio %d event: %d\n", gpio, events);
+	if (gpio != BUTTON_PIN) {
+		return; // Ignore other GPIO events
+	}
+	gpio_set_irq_enabled_with_callback(BUTTON_PIN, GPIO_IRQ_EDGE_RISE, false, take_picture_callback);
+	take_picture = true;
+}
 
 int main() {
 	stdio_init_all();
 
 	// Wait some time for USB serial connection
 	sleep_ms(1000);
+
+	gpio_init(BUTTON_PIN);
+    gpio_set_dir(BUTTON_PIN, GPIO_IN);
+    gpio_pull_up(BUTTON_PIN);
+
+	gpio_set_irq_enabled_with_callback(BUTTON_PIN, GPIO_IRQ_EDGE_RISE, true, take_picture_callback);
 
 	gpio_init(CAM_RET_PIN);
     gpio_set_dir(CAM_RET_PIN, GPIO_OUT);
@@ -110,7 +125,14 @@ int main() {
         return -1; // Error al inicializar el LCD
     }
 
+	lcd_fill_screen(&lcd, BLACK);
+
 	while (1) {
+		if(take_picture){
+			take_picture = false;
+			camera_term(&camera);
+		}
+
 		printf("Capturing...\n");
 		gpio_put(LED_PIN, 1);
 		ret = camera_capture_blocking(&camera, buf, true);
@@ -119,23 +141,19 @@ int main() {
 			printf("Capture error: %d\n", ret);
 		} else {
 			printf("Capture success\n");
-			int y, x;
+			uint8_t y, x;
 			uint16_t image[height * width]; // Matriz completa en memoria
+			printf("Capture success\n");
 			for (y = 0; y < height; y++) {
-				uint16_t row[width];
-				for (x = 0; x < width; x++) {
-					uint16_t pixel565 = buf->data[0][buf->strides[0] * y + x];
-					uint8_t r = (pixel565 >> 11) & 0x1F;
-					uint8_t g = (pixel565 >> 5) & 0x3F;
-					uint8_t b = pixel565 & 0x1F;
-					printf("r: %d, g: %d, b: %d\n", r, g, b);
-					// Convertir a RGB565
-					image[y * width + x] = (r  << 11) | (g  << 5) | b; ;
+				for (x = 0; x < buf->strides[0]; x+=2) {
+					uint32_t idx = buf->strides[0] * y + x;
+					uint16_t pixel = (buf->data[0][idx + 1]) | buf->data[0][idx]<<8;   
+					image[width * y + x/2] = pixel;
+					printf("Pixel at (%d, %d): 0x%04X\n", x, y, pixel);
 				}
 			}
-			//camera_term(&camera);
-			lcd_fill_screen(&lcd, image); // Llenar pantalla con el primer pixel
-			sleep_ms(1000); // Esperar un segundo antes de la siguiente captura
+			lcd_show_image(&lcd, width, height, image);
+			sleep_ms(1000);
 		}
 	}
 }
